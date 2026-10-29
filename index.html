@@ -291,7 +291,7 @@ p{font-size:clamp(.92rem,1vw,1.03rem);line-height:1.75;letter-spacing:0;max-widt
 @media(max-width:600px){.motion-gallery{height:165svh!important}.motion-gallery>.wrap{padding-top:76px;padding-bottom:12px}.motion-slide{height:clamp(215px,36svh,330px)}}
 @media(prefers-reduced-motion:reduce){.motion-gallery{height:auto!important}.motion-gallery>.wrap{height:auto;max-height:none;position:relative;overflow:visible}}
 </style></head><body><header class="topbar"><div class="wrap nav"><a aria-label="CHAMBUILD Home" class="logo" href="#home"><img alt="CHAMBUILD — Your Vision, Our Commitment" class="brand-logo" src="chambuild-logo-transparent.png"/></a><nav aria-label="Primary navigation" class="navlinks" id="navlinks"><a href="#home">Home</a><a href="#about">About</a><a href="#services">Services</a><a href="#projects">Projects</a><a href="#standards">Standards</a><a href="#careers">Careers</a></nav><a class="btn nav-cta" href="#contact">Get a Quote <span>↗</span></a><button aria-controls="navlinks" aria-expanded="false" aria-label="Open menu" class="menu-toggle" id="menuToggle">☰</button></div></header><main id="main">
-<section aria-label="Home page" class="page active" id="home"><section aria-label="Scroll-controlled CHAMBUILD film" class="film-sequence" id="filmSequence"><div class="film-sticky"><video id="filmVideo" class="film-video" muted playsinline preload="auto" poster="chambuild-video-poster.jpg" aria-label="Architectural film controlled by scrolling"><source src="chambuild-scroll-video.mp4" type="video/mp4"></video><div class="film-shade"></div><div class="film-copy wrap"><span class="film-kicker">CHAMBUILD / THE GAMBIA</span><h1>Building with<br><em>purpose.</em></h1><p>Construction, engineering and property improvement, thoughtfully delivered.</p><a href="#services" class="btn">Explore our services ↗</a></div><div class="film-footer"><span>SCROLL TO EXPLORE</span><div class="film-progress"><span id="filmProgress"></span></div><span id="filmPercent">00%</span></div></div></section>
+<section aria-label="Home page" class="page active" id="home"><section aria-label="Scroll-controlled CHAMBUILD film" class="film-sequence" id="filmSequence"><div class="film-sticky"><video id="filmVideo" class="film-video" muted playsinline preload="auto" poster="chambuild-video-poster.jpg" aria-label="Architectural film controlled by scrolling"><source src="chambuild-scroll-smooth.mp4" type="video/mp4"></video><div class="film-shade"></div><div class="film-copy wrap"><span class="film-kicker">CHAMBUILD / THE GAMBIA</span><h1>Building with<br><em>purpose.</em></h1><p>Construction, engineering and property improvement, thoughtfully delivered.</p><a href="#services" class="btn">Explore our services ↗</a></div><div class="film-footer"><span>SCROLL TO EXPLORE</span><div class="film-progress"><span id="filmProgress"></span></div><span id="filmPercent">00%</span></div></div></section>
 <section aria-label="Explore project perspectives" class="motion-gallery"><div class="wrap"><div class="motion-heading"><div><div class="eyebrow">Inspiration in motion</div><h2>Places with <em>purpose.</em></h2></div><p>Explore the spaces and disciplines shaping our approach. Images are illustrative concepts, not completed CHAMBUILD commissions.</p><div class="motion-controls"><button aria-label="Previous image" id="motionPrev" type="button">←</button><button aria-label="Next image" id="motionNext" type="button">→</button></div></div><div aria-label="Image carousel, use arrow keys" class="motion-viewport" id="motionViewport" tabindex="0"><div class="motion-track" id="motionTrack">
 <article class="motion-slide"><img alt="Contemporary residential interior" loading="lazy" src="https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&amp;fit=crop&amp;w=1100&amp;q=80"/><div class="motion-slide-content"><span>01 / Residential</span><h3>Designed for living</h3></div></article>
 <article class="motion-slide"><img alt="Modern architectural structure" loading="lazy" src="https://images.unsplash.com/photo-1487958449943-2429e8be8625?auto=format&amp;fit=crop&amp;w=1100&amp;q=80"/><div class="motion-slide-content"><span>02 / Architecture</span><h3>Form meets function</h3></div></article>
@@ -426,12 +426,46 @@ function schedule(){if(!scheduled){scheduled=true;requestAnimationFrame(update)}
 })();
 </script>
 <script>
-/* Scroll controls playback position; never autoplays, and reverses naturally on upward scroll. */
-(()=>{const area=document.getElementById('filmSequence'),video=document.getElementById('filmVideo'),progressBar=document.getElementById('filmProgress'),percent=document.getElementById('filmPercent');if(!area||!video)return;
-const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;let target=0,displayed=0,raf=0,ready=false;
-video.pause();video.muted=true;video.addEventListener('loadedmetadata',()=>{ready=true;updateTarget();animate()});
-function updateTarget(){if(!document.getElementById('home').classList.contains('active'))return;const r=area.getBoundingClientRect(),distance=Math.max(1,r.height-innerHeight);target=Math.min(1,Math.max(0,-r.top/distance));if(reduced)target=0;progressBar.style.transform='scaleX('+target+')';percent.textContent=String(Math.round(target*100)).padStart(2,'0')+'%';if(ready&&!raf)raf=requestAnimationFrame(animate)}
-function animate(){raf=0;if(!ready||!document.getElementById('home').classList.contains('active'))return;displayed+=(target-displayed)*.22;if(Math.abs(target-displayed)<.0007)displayed=target;const time=displayed*Math.max(0,video.duration-.04);if(video.seekable.length&&Math.abs(video.currentTime-time)>.035){try{video.currentTime=time}catch(e){}}if(Math.abs(target-displayed)>.0007)raf=requestAnimationFrame(animate)}
-addEventListener('scroll',updateTarget,{passive:true});addEventListener('resize',updateTarget);addEventListener('hashchange',()=>{if(location.hash==='#home'||!location.hash){updateTarget();if(ready&&!raf)raf=requestAnimationFrame(animate)}});document.addEventListener('visibilitychange',()=>{if(document.hidden)video.pause()});updateTarget();
+/* V11: seek-friendly, rate-limited scroll video, without a seek on every animation frame. */
+(()=>{
+ const area=document.getElementById('filmSequence'),video=document.getElementById('filmVideo');
+ const bar=document.getElementById('filmProgress'),label=document.getElementById('filmPercent');
+ if(!area||!video)return;
+ const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+ let target=0,displayed=0,ready=false,raf=0,lastSeek=0;
+ const clamp=n=>Math.max(0,Math.min(1,n));
+ video.pause();video.muted=true;video.preload='auto';
+ function active(){return document.getElementById('home').classList.contains('active')&&!document.hidden}
+ function readScroll(){
+  if(!active())return;
+  const rect=area.getBoundingClientRect(),distance=Math.max(1,rect.height-innerHeight);
+  target=reduced?0:clamp(-rect.top/distance);
+  bar.style.transform='scaleX('+target+')';
+  label.textContent=String(Math.round(target*100)).padStart(2,'0')+'%';
+  schedule();
+ }
+ function schedule(){if(!raf&&ready&&active()&&!reduced)raf=requestAnimationFrame(tick)}
+ function tick(now){
+  raf=0;if(!ready||!active()||reduced)return;
+  displayed+=(target-displayed)*.38;
+  if(Math.abs(target-displayed)<.001)displayed=target;
+  const time=Math.round(displayed*Math.max(0,video.duration-.05)*24)/24;
+  // Wait for the decoder; don't pile up overlapping seek requests.
+  if(!video.seeking&&now-lastSeek>=75&&Math.abs(video.currentTime-time)>.045){
+   lastSeek=now;
+   try{video.currentTime=time}catch(e){}
+  }
+  if(Math.abs(target-displayed)>.001||Math.abs(video.currentTime-time)>.07){
+   if(!video.seeking)raf=requestAnimationFrame(tick);
+  }
+ }
+ video.addEventListener('loadedmetadata',()=>{ready=true;readScroll();schedule()});
+ video.addEventListener('seeked',schedule);
+ addEventListener('scroll',readScroll,{passive:true});
+ addEventListener('resize',readScroll,{passive:true});
+ addEventListener('hashchange',()=>requestAnimationFrame(readScroll));
+ document.addEventListener('visibilitychange',()=>{video.pause();if(!document.hidden)readScroll()});
+ if(video.readyState>=1){ready=true;readScroll()}
+ else readScroll();
 })();
 </script></body></html>
