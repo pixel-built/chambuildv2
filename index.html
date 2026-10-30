@@ -281,6 +281,10 @@ p{font-size:clamp(.92rem,1vw,1.03rem);line-height:1.75;letter-spacing:0;max-widt
 .film-progress{width:min(250px,30vw);height:2px;background:#ffffff55;overflow:hidden;border-radius:4px}.film-progress span{display:block;height:100%;background:#f25326;transform:scaleX(0);transform-origin:left;width:100%;will-change:transform}
 @media(max-width:700px){.film-sequence{height:245svh}.film-shade{background:linear-gradient(90deg,#0b0e12c9,#0b0e1270),linear-gradient(0deg,#0b0e12a0,transparent 60%)}.film-video{object-position:55% center}.film-copy{padding-top:75px;padding-bottom:95px}.film-copy h1{font-size:clamp(2.7rem,11vw,4.3rem)}.film-copy p{max-width:31ch}.film-footer{font-size:.55rem}.film-progress{flex:1;width:auto}}
 @media(prefers-reduced-motion:reduce){.film-sequence{height:100svh}.film-video{display:none}.film-sticky{background:linear-gradient(90deg,#101316d0,#10131650),url('chambuild-video-poster.jpg') center/cover}.film-progress{display:none}}
+
+/* V12: show a proper fallback instead of an empty video area. */
+.film-fallback .film-sticky{background:linear-gradient(90deg,#101316e8,#10131677),url('chambuild-video-poster.jpg') center/cover}
+.film-fallback .film-video{opacity:0}
 </style><style id="v9-repair">
 /* Navigation and scroll-gallery repair */
 .motion-gallery{height:190svh!important;overflow:visible!important;contain:none!important}
@@ -426,46 +430,60 @@ function schedule(){if(!scheduled){scheduled=true;requestAnimationFrame(update)}
 })();
 </script>
 <script>
-/* V11: seek-friendly, rate-limited scroll video, without a seek on every animation frame. */
+/* V12: prime first decoded frame; serialize scroll seeks; reliable fallback. */
 (()=>{
  const area=document.getElementById('filmSequence'),video=document.getElementById('filmVideo');
  const bar=document.getElementById('filmProgress'),label=document.getElementById('filmPercent');
  if(!area||!video)return;
- const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
- let target=0,displayed=0,ready=false,raf=0,lastSeek=0;
- const clamp=n=>Math.max(0,Math.min(1,n));
- video.pause();video.muted=true;video.preload='auto';
- function active(){return document.getElementById('home').classList.contains('active')&&!document.hidden}
- function readScroll(){
+ const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+ let target=0,desired=0,ready=false,busy=false,lastSeek=0,raf=0,primed=false;
+ const clamp=v=>Math.max(0,Math.min(1,v));
+ const active=()=>document.getElementById('home').classList.contains('active');
+ video.muted=true;video.defaultMuted=true;video.playsInline=true;video.preload='auto';
+ video.setAttribute('muted','');video.setAttribute('playsinline','');
+ function position(){
   if(!active())return;
   const rect=area.getBoundingClientRect(),distance=Math.max(1,rect.height-innerHeight);
-  target=reduced?0:clamp(-rect.top/distance);
+  target=reduce?0:clamp(-rect.top/distance);
   bar.style.transform='scaleX('+target+')';
   label.textContent=String(Math.round(target*100)).padStart(2,'0')+'%';
+  desired=target*Math.max(0,(Number.isFinite(video.duration)?video.duration:0)-.05);
   schedule();
  }
- function schedule(){if(!raf&&ready&&active()&&!reduced)raf=requestAnimationFrame(tick)}
+ function schedule(){if(!raf&&ready&&primed&&!reduce&&active()&&!document.hidden)raf=requestAnimationFrame(tick)}
  function tick(now){
-  raf=0;if(!ready||!active()||reduced)return;
-  displayed+=(target-displayed)*.38;
-  if(Math.abs(target-displayed)<.001)displayed=target;
-  const time=Math.round(displayed*Math.max(0,video.duration-.05)*24)/24;
-  // Wait for the decoder; don't pile up overlapping seek requests.
-  if(!video.seeking&&now-lastSeek>=75&&Math.abs(video.currentTime-time)>.045){
-   lastSeek=now;
-   try{video.currentTime=time}catch(e){}
-  }
-  if(Math.abs(target-displayed)>.001||Math.abs(video.currentTime-time)>.07){
-   if(!video.seeking)raf=requestAnimationFrame(tick);
-  }
+  raf=0;if(!ready||!primed||busy||reduce||!active()||document.hidden)return;
+  const difference=Math.abs(video.currentTime-desired);
+  if(difference<.055)return;
+  if(now-lastSeek<90){raf=requestAnimationFrame(tick);return}
+  lastSeek=now;busy=true;
+  try{video.currentTime=Math.max(0,Math.min(desired,video.duration-.03))}catch(e){busy=false;fallback()}
  }
- video.addEventListener('loadedmetadata',()=>{ready=true;readScroll();schedule()});
- video.addEventListener('seeked',schedule);
- addEventListener('scroll',readScroll,{passive:true});
- addEventListener('resize',readScroll,{passive:true});
- addEventListener('hashchange',()=>requestAnimationFrame(readScroll));
- document.addEventListener('visibilitychange',()=>{video.pause();if(!document.hidden)readScroll()});
- if(video.readyState>=1){ready=true;readScroll()}
- else readScroll();
+ function fallback(){
+  /* If seeking is unavailable, play the actual film instead of leaving the poster. */
+  video.controls=false;
+  video.play().catch(()=>{});
+ }
+ function prime(){
+  if(primed||!ready)return;
+  primed=true;
+  // Playback primes the browser's video compositor, then seeking controls the film.
+  const promise=video.play();
+  if(promise&&typeof promise.then==='function')promise.then(()=>{
+   setTimeout(()=>{video.pause();position()},120);
+  }).catch(()=>{video.pause();position()});
+  else {video.pause();position()}
+ }
+ video.addEventListener('loadedmetadata',()=>{ready=true;prime()});
+ video.addEventListener('loadeddata',()=>{if(!primed){ready=true;prime()}});
+ video.addEventListener('seeked',()=>{busy=false;schedule()});
+ video.addEventListener('error',()=>{area.classList.add('film-fallback');console.warn('CHAMBUILD video failed to load. Check MP4 path and hosting.')});
+ addEventListener('scroll',position,{passive:true});
+ addEventListener('resize',position,{passive:true});
+ addEventListener('hashchange',()=>requestAnimationFrame(position));
+ document.addEventListener('visibilitychange',()=>{if(document.hidden)video.pause();else position()});
+ if(video.readyState>=1){ready=true;prime()}
+ video.load();position();
+ setTimeout(()=>{if(!ready||video.error){area.classList.add('film-fallback')}},7000);
 })();
 </script></body></html>
